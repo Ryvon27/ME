@@ -4,13 +4,11 @@ from ultralytics import YOLO
 import cvzone
 import pandas as pd
 import json
+import time
 
 # Load YOLOv8 model
 model = YOLO('yolov8n.pt')
 names = model.names
-
-# Vertical line position
-line_x = 480
 
 # Previous center positions
 hist = {}
@@ -20,7 +18,7 @@ in_count = 0
 out_count = 0
 
 # Open video file or webcam
-cap = cv2.VideoCapture("vid1.mp4")  # Ganti ke 0 untuk webcam
+cap = cv2.VideoCapture("vid3.mp4")  # Ganti ke 0 untuk webcam
 
 # Check if video opened successfully
 if not cap.isOpened():
@@ -28,6 +26,13 @@ if not cap.isOpened():
     exit()
 
 frame_count = 0
+prev_time = time.time()  # For FPS calculation
+
+# Koordinat garis miring di zebracross (contoh, sesuaikan)
+line_p1 = (500, 700)   # titik kiri bawah
+line_p2 = (1000, 550)   # titik kanan atas
+line_x = 700           # perkiraan X garis di tengah, untuk logika counting sederhana
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -38,16 +43,25 @@ while True:
     if frame_count % 2 != 0:
         continue  # Skip every other frame
 
-    frame = cv2.resize(frame, (1020, 600))
+    # Rotate frame 90 derajat CCW
+    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+    # Resize ke 1280x720 (16:9)
+    frame = cv2.resize(frame, (1280, 720))
+
+    # FPS calculation
+    current_time = time.time()
+    fps = 1 / (current_time - prev_time)
+    prev_time = current_time
 
     # Detect and track persons (class 0)
-    results = model.track(frame, persist=True, classes=[0])
+    results = model.track(frame, persist=True, classes=[0], tracker='bytetrack.yaml')
 
     if results[0].boxes.id is not None:
         ids = results[0].boxes.id.cpu().numpy().astype(int)
         boxes = results[0].boxes.xyxy.cpu().numpy().astype(int)
         class_ids = results[0].boxes.cls.int().cpu().tolist()
-        
+
         for box, track_id, class_id in zip(boxes, ids, class_ids):
             x1, y1, x2, y2 = box
             c = names[class_id]
@@ -61,7 +75,7 @@ while True:
             cvzone.putTextRect(frame, f'ID: {track_id}', (x1, y2 + 10), scale=1, thickness=1,
                                colorT=(255, 255, 255), colorR=(0, 255, 0))
 
-            # Counting logic
+            # Counting logic sederhana berbasis X (masih)
             if track_id in hist:
                 prev_cx, _ = hist[track_id]
                 if prev_cx < line_x <= cx:
@@ -75,9 +89,15 @@ while True:
     # Display current total counts
     cvzone.putTextRect(frame, f'IN: {in_count}', (40, 60), scale=2, thickness=2,
                        colorT=(255, 255, 255), colorR=(0, 128, 0))
-    cvzone.putTextRect(frame, f'OUT: {out_count}', (40, 100), scale=2, thickness=2,
+    cvzone.putTextRect(frame, f'OUT: {out_count}', (40, 110), scale=2, thickness=2,
                        colorT=(255, 255, 255), colorR=(0, 0, 255))
-    cv2.line(frame, (line_x, 0), (line_x, frame.shape[0]), (255, 255, 255), 2)
+
+    # Display FPS in top-right corner
+    cvzone.putTextRect(frame, f'FPS: {fps:.2f}', (frame.shape[1] - 220, 30), scale=2, thickness=2,
+                       colorT=(255, 255, 255), colorR=(50, 50, 50))
+
+    # Draw diagonal counting line
+    cv2.line(frame, line_p1, line_p2, (255, 255, 255), 2)
 
     cv2.imshow("RGB", frame)
 
